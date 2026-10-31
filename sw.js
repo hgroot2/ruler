@@ -1,6 +1,6 @@
 // Caches the whole app on first visit so it opens with no connection.
 // Bump CACHE when any file changes so phones pick up the new version.
-const CACHE = 'mm-ruler-v4';
+const CACHE = 'mm-ruler-v5';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

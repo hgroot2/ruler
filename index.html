@@ -33,15 +33,18 @@
   }
 }
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
+/* iOS lays out home-screen apps one status bar shorter than the screen; add it back.
+   No overflow: hidden here, since that clips at the short height. touch-action stops scrolling instead. */
+html { height: calc(100% + env(safe-area-inset-top, 0px)); margin: 0; overscroll-behavior: none; }
 body {
+  height: 100%; margin: 0; position: relative;
   background: var(--bg); color: var(--ink);
   font: 14px var(--sans);
-  overflow: hidden; overscroll-behavior: none;
+  overscroll-behavior: none;
   touch-action: none; user-select: none; -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
-#ruler { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#ruler { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
 #info {
   position: absolute;
   right: max(16px, env(safe-area-inset-right, 0px));
