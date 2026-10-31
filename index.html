@@ -46,58 +46,20 @@ body {
   position: absolute;
   right: max(16px, env(safe-area-inset-right, 0px));
   top: calc(env(safe-area-inset-top, 0px) + 12px);
-  width: min(190px, 52%);
-  display: flex; flex-direction: column; gap: 12px;
   background: var(--panel);
   border: 1px solid var(--line); border-radius: 10px;
-  padding: 14px;
+  padding: 12px 14px;
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-  touch-action: manipulation;
+  pointer-events: none;
 }
-.label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 #reading { font-family: var(--mono); font-size: 34px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
 #reading small { font-size: 15px; font-weight: 400; color: var(--muted); margin-left: 4px; }
-.hint { font-size: 12px; line-height: 1.4; color: var(--muted); }
-.cal { display: flex; align-items: center; gap: 6px; }
-.cal button {
-  font: 600 16px var(--mono); color: var(--ink);
-  background: transparent; border: 1px solid var(--line); border-radius: 6px;
-  width: 36px; height: 32px; cursor: pointer;
-}
-.cal button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.cal span { font-family: var(--mono); font-size: 13px; flex: 1; text-align: center; font-variant-numeric: tabular-nums; }
-#reset { font: 12px var(--sans); color: var(--muted); background: none; border: 0; padding: 0; text-align: left; text-decoration: underline; cursor: pointer; }
 </style>
 </head>
 <body>
 <canvas id="ruler" aria-label="Millimetre ruler"></canvas>
 <div id="info">
-  <div>
-    <div class="label">Reading</div>
-    <div id="reading">0.0<small>mm</small></div>
-  </div>
-  <div class="hint" id="hint"></div>
-  <div>
-    <div class="label" id="device">iPhone 17 Pro · 460 ppi</div>
-  </div>
-  <div>
-    <div class="label">Scale</div>
-    <div class="cal">
-      <button id="minus" type="button" aria-label="Shrink scale">−</button>
-      <span id="calVal">100.0%</span>
-      <button id="plus" type="button" aria-label="Stretch scale">+</button>
-    </div>
-  </div>
-  <div id="edgeRow">
-    <div class="label">Edge to screen</div>
-    <div class="cal">
-      <button id="edgeMinus" type="button" aria-label="Decrease edge offset">−</button>
-      <span id="edgeVal">2.6 mm</span>
-      <button id="edgePlus" type="button" aria-label="Increase edge offset">+</button>
-    </div>
-  </div>
-  <div class="hint">Check: a bank card's long side is 85.6 mm.</div>
-  <button id="reset" type="button">Reset adjustments</button>
+  <div id="reading">0.0<small>mm</small></div>
 </div>
 
 <script>
@@ -115,17 +77,11 @@ body {
   // Display Zoom shrinks the logical width (e.g. 375 pt); scale up to match.
   const sw = Math.min(screen.width, screen.height);
   const zoomFactor = (sw >= 320 && sw <= NATIVE_PT_WIDTH) ? NATIVE_PT_WIDTH / sw : 1;
-  if (zoomFactor !== 1) document.getElementById('device').textContent = 'iPhone 17 Pro · Display Zoom';
 
-  document.getElementById('hint').textContent = standalone
-    ? '0 is the top edge of the phone. Butt the object against it, then drag the red line.'
-    : 'In Safari, 0 is the top of the page. Add to Home Screen to measure from the phone’s edge.';
-  document.getElementById('edgeRow').hidden = !standalone;
-
+  // Adjustments saved by earlier versions still apply.
   const load = (k, d) => { try { const v = parseFloat(localStorage.getItem(k)); return isNaN(v) ? d : v; } catch (e) { return d; } };
-  const save = (k, v) => { try { localStorage.setItem(k, String(v)); } catch (e) {} };
-  let cal = load('mmRulerCal', 1);
-  let edge = load('mmRulerEdge', EDGE_MM);
+  const cal = load('mmRulerCal', 1);
+  const edge = load('mmRulerEdge', EDGE_MM);
 
   const canvas = document.getElementById('ruler');
   const ctx = canvas.getContext('2d');
@@ -167,12 +123,8 @@ body {
       const len = mm % 10 === 0 ? 30 : mm % 5 === 0 ? 20 : 12;
       ctx.lineWidth = mm % 10 === 0 ? 1.5 : 1 / dpr * 2;
       ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + len, y); ctx.stroke();
-      if (mm % 10 === 0) ctx.fillText(String(mm / 10), x0 + 36, Math.max(y, 8));
+      if (mm % 10 === 0) ctx.fillText(String(mm), x0 + 36, Math.max(y, 8));
     }
-    const cmY = (10 - z) * ppm + 14;
-    ctx.font = '400 10px ' + css('--mono');
-    ctx.fillStyle = css('--muted');
-    ctx.fillText('cm', cornerInset(cmY, h) + 36, cmY);
 
     // Cursor
     const cy = (cursorMm - z) * ppm;
@@ -180,8 +132,6 @@ body {
     ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke();
 
     readingEl.innerHTML = cursorMm.toFixed(1) + '<small>mm</small>';
-    document.getElementById('calVal').textContent = (cal * 100).toFixed(1) + '%';
-    document.getElementById('edgeVal').textContent = edge.toFixed(1) + ' mm';
   }
 
   function moveTo(e) {
@@ -191,24 +141,10 @@ body {
     draw();
   }
   let dragging = false;
-  window.addEventListener('pointerdown', e => { if (e.target.closest('#info')) return; dragging = true; moveTo(e); });
+  window.addEventListener('pointerdown', e => { dragging = true; moveTo(e); });
   window.addEventListener('pointermove', e => { if (dragging) moveTo(e); });
   window.addEventListener('pointerup', () => { dragging = false; });
   window.addEventListener('pointercancel', () => { dragging = false; });
-
-  function setCal(v) {
-    cal = Math.min(1.1, Math.max(0.9, Math.round(v * 1000) / 1000));
-    save('mmRulerCal', cal); draw();
-  }
-  function setEdge(v) {
-    edge = Math.min(6, Math.max(0, Math.round(v * 10) / 10));
-    save('mmRulerEdge', edge); draw();
-  }
-  document.getElementById('minus').onclick = () => setCal(cal - 0.002);
-  document.getElementById('plus').onclick = () => setCal(cal + 0.002);
-  document.getElementById('edgeMinus').onclick = () => setEdge(edge - 0.1);
-  document.getElementById('edgePlus').onclick = () => setEdge(edge + 0.1);
-  document.getElementById('reset').onclick = () => { setCal(1); setEdge(EDGE_MM); };
 
   window.addEventListener('resize', draw);
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', draw);
