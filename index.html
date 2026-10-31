@@ -103,6 +103,9 @@ body {
 
   function draw() {
     const dpr = window.devicePixelRatio || 1;
+    // iOS home-screen apps report a page height that leaves out the status bar,
+    // so size the canvas from the physical screen to reach the bottom edge.
+    if (standalone) canvas.style.height = Math.max(screen.width, screen.height) + 'px';
     const w = canvas.clientWidth, h = canvas.clientHeight;
     canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
