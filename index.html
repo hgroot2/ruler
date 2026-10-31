@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>mm Ruler</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ruler">
+<!-- black-translucent lets the page run under the status bar, so y = 0 is the top edge of the glass -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#f6f3e8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17181a" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+/* Layout: one screen. Ruler scale hugs the left edge from the very top of the glass, reading and controls sit to its right. */
+:root {
+  --bg: #f6f3e8;          /* boxwood ruler face */
+  --ink: #1d1f1c;
+  --muted: #6b6a5e;
+  --line: #d9d3bf;
+  --accent: #d2331f;      /* red cursor line, like a drafting cursor */
+  --panel: #ffffffb3;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: -apple-system, system-ui, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181a; --ink: #ecebe4; --muted: #9a998f; --line: #34352f;
+    --accent: #ff6a52; --panel: #23242699; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 14px var(--sans);
+  overflow: hidden; overscroll-behavior: none;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+#ruler { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#info {
+  position: absolute;
+  right: max(16px, env(safe-area-inset-right, 0px));
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  width: min(190px, 52%);
+  display: flex; flex-direction: column; gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  touch-action: manipulation;
+}
+.label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+#reading { font-family: var(--mono); font-size: 34px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+#reading small { font-size: 15px; font-weight: 400; color: var(--muted); margin-left: 4px; }
+.hint { font-size: 12px; line-height: 1.4; color: var(--muted); }
+.cal { display: flex; align-items: center; gap: 6px; }
+.cal button {
+  font: 600 16px var(--mono); color: var(--ink);
+  background: transparent; border: 1px solid var(--line); border-radius: 6px;
+  width: 36px; height: 32px; cursor: pointer;
+}
+.cal button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cal span { font-family: var(--mono); font-size: 13px; flex: 1; text-align: center; font-variant-numeric: tabular-nums; }
+#reset { font: 12px var(--sans); color: var(--muted); background: none; border: 0; padding: 0; text-align: left; text-decoration: underline; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="ruler" aria-label="Millimetre ruler"></canvas>
+<div id="info">
+  <div>
+    <div class="label">Reading</div>
+    <div id="reading">0.0<small>mm</small></div>
+  </div>
+  <div class="hint" id="hint"></div>
+  <div>
+    <div class="label" id="device">iPhone 17 Pro · 460 ppi</div>
+  </div>
+  <div>
+    <div class="label">Scale</div>
+    <div class="cal">
+      <button id="minus" type="button" aria-label="Shrink scale">−</button>
+      <span id="calVal">100.0%</span>
+      <button id="plus" type="button" aria-label="Stretch scale">+</button>
+    </div>
+  </div>
+  <div id="edgeRow">
+    <div class="label">Edge to screen</div>
+    <div class="cal">
+      <button id="edgeMinus" type="button" aria-label="Decrease edge offset">−</button>
+      <span id="edgeVal">2.6 mm</span>
+      <button id="edgePlus" type="button" aria-label="Increase edge offset">+</button>
+    </div>
+  </div>
+  <div class="hint">Check: a bank card's long side is 85.6 mm.</div>
+  <button id="reset" type="button">Reset adjustments</button>
+</div>
+
+<script>
+(() => {
+  // iPhone 17 Pro (Apple tech specs): body 150.0 × 71.9 mm, screen 2622 × 1206 px at 460 ppi, rendered at 3x.
+  const NATIVE_PT_WIDTH = 402;
+  const BASE_PX_PER_MM = 460 / 3 / 25.4;               // ≈ 6.0367 pt per mm
+  const SCREEN_H_MM = 2622 / 460 * 25.4;               // ≈ 144.78 mm of lit screen
+  const EDGE_MM = Math.round((150.0 - SCREEN_H_MM) / 2 * 10) / 10; // ≈ 2.6 mm frame + bezel above the screen
+  const CORNER_PT = 62;                                // approx. screen corner radius, in points
+
+  // Only a home-screen launch puts y = 0 at the top of the glass; in Safari the toolbar sits above.
+  const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+
+  // Display Zoom shrinks the logical width (e.g. 375 pt); scale up to match.
+  const sw = Math.min(screen.width, screen.height);
+  const zoomFactor = (sw >= 320 && sw <= NATIVE_PT_WIDTH) ? NATIVE_PT_WIDTH / sw : 1;
+  if (zoomFactor !== 1) document.getElementById('device').textContent = 'iPhone 17 Pro · Display Zoom';
+
+  document.getElementById('hint').textContent = standalone
+    ? '0 is the top edge of the phone. Butt the object against it, then drag the red line.'
+    : 'In Safari, 0 is the top of the page. Add to Home Screen to measure from the phone’s edge.';
+  document.getElementById('edgeRow').hidden = !standalone;
+
+  const load = (k, d) => { try { const v = parseFloat(localStorage.getItem(k)); return isNaN(v) ? d : v; } catch (e) { return d; } };
+  const save = (k, v) => { try { localStorage.setItem(k, String(v)); } catch (e) {} };
+  let cal = load('mmRulerCal', 1);
+  let edge = load('mmRulerEdge', EDGE_MM);
+
+  const canvas = document.getElementById('ruler');
+  const ctx = canvas.getContext('2d');
+  const readingEl = document.getElementById('reading');
+  let cursorMm = 50;
+
+  const pxPerMm = () => BASE_PX_PER_MM * zoomFactor * cal;
+  const zeroMm = () => standalone ? edge : 0;   // ruler value at the top of the canvas
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  // How far the rounded screen corner eats into the left edge at height y.
+  function cornerInset(y, h) {
+    if (!standalone) return 0;
+    const r = CORNER_PT / zoomFactor;
+    const d = Math.min(y, h - y);
+    if (d >= r) return 0;
+    return r - Math.sqrt(r * r - (r - d) * (r - d)) + 3;
+  }
+
+  function draw() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    const ppm = pxPerMm(), z = zeroMm();
+    const ink = css('--ink'), accent = css('--accent');
+    const half = 0.5 / dpr; // centre 1-device-pixel lines on device pixels
+
+    ctx.fillStyle = ink; ctx.strokeStyle = ink;
+    ctx.font = '600 13px ' + css('--mono');
+    ctx.textBaseline = 'middle';
+
+    // Half-mm ticks are too dense to read; stick to whole mm.
+    for (let mm = Math.ceil(z); (mm - z) * ppm <= h; mm++) {
+      const y = Math.round((mm - z) * ppm * dpr) / dpr + half;
+      const x0 = cornerInset(y, h);
+      const len = mm % 10 === 0 ? 30 : mm % 5 === 0 ? 20 : 12;
+      ctx.lineWidth = mm % 10 === 0 ? 1.5 : 1 / dpr * 2;
+      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + len, y); ctx.stroke();
+      if (mm % 10 === 0) ctx.fillText(String(mm / 10), x0 + 36, Math.max(y, 8));
+    }
+    const cmY = (10 - z) * ppm + 14;
+    ctx.font = '400 10px ' + css('--mono');
+    ctx.fillStyle = css('--muted');
+    ctx.fillText('cm', cornerInset(cmY, h) + 36, cmY);
+
+    // Cursor
+    const cy = (cursorMm - z) * ppm;
+    ctx.strokeStyle = accent; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke();
+
+    readingEl.innerHTML = cursorMm.toFixed(1) + '<small>mm</small>';
+    document.getElementById('calVal').textContent = (cal * 100).toFixed(1) + '%';
+    document.getElementById('edgeVal').textContent = edge.toFixed(1) + ' mm';
+  }
+
+  function moveTo(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mm = zeroMm() + (e.clientY - rect.top) / pxPerMm();
+    cursorMm = Math.max(0, Math.round(mm * 2) / 2); // snap to 0.5 mm
+    draw();
+  }
+  let dragging = false;
+  window.addEventListener('pointerdown', e => { if (e.target.closest('#info')) return; dragging = true; moveTo(e); });
+  window.addEventListener('pointermove', e => { if (dragging) moveTo(e); });
+  window.addEventListener('pointerup', () => { dragging = false; });
+  window.addEventListener('pointercancel', () => { dragging = false; });
+
+  function setCal(v) {
+    cal = Math.min(1.1, Math.max(0.9, Math.round(v * 1000) / 1000));
+    save('mmRulerCal', cal); draw();
+  }
+  function setEdge(v) {
+    edge = Math.min(6, Math.max(0, Math.round(v * 10) / 10));
+    save('mmRulerEdge', edge); draw();
+  }
+  document.getElementById('minus').onclick = () => setCal(cal - 0.002);
+  document.getElementById('plus').onclick = () => setCal(cal + 0.002);
+  document.getElementById('edgeMinus').onclick = () => setEdge(edge - 0.1);
+  document.getElementById('edgePlus').onclick = () => setEdge(edge + 0.1);
+  document.getElementById('reset').onclick = () => { setCal(1); setEdge(EDGE_MM); };
+
+  window.addEventListener('resize', draw);
+  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', draw);
+  draw();
+
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>
