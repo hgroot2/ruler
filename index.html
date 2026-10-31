@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <style>
-/* Layout: one screen. Ruler scale hugs the left edge from the very top of the glass, reading and controls sit to its right. */
+/* Layout: one screen. Matching scales hug both long edges, counting up from the bottom edge; the reading floats in the centre. */
 :root {
   --bg: #f6f3e8;          /* boxwood ruler face */
   --ink: #1d1f1c;
@@ -47,16 +47,17 @@ body {
 #ruler { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
 #info {
   position: absolute;
-  right: max(16px, env(safe-area-inset-right, 0px));
-  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
   background: var(--panel);
-  border: 1px solid var(--line); border-radius: 10px;
-  padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 16px;
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
   pointer-events: none;
+  white-space: nowrap;
 }
-#reading { font-family: var(--mono); font-size: 34px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
-#reading small { font-size: 15px; font-weight: 400; color: var(--muted); margin-left: 4px; }
+#reading { font-family: var(--mono); font-size: 52px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+#reading small { font-size: 20px; font-weight: 400; color: var(--muted); margin-left: 6px; }
 </style>
 </head>
 <body>
@@ -92,7 +93,8 @@ body {
   let cursorMm = 50;
 
   const pxPerMm = () => BASE_PX_PER_MM * zoomFactor * cal;
-  const zeroMm = () => standalone ? edge : 0;   // ruler value at the top of the canvas
+  // 0 is the bottom edge: the status bar blurs whatever sits under it at the top.
+  const zeroMm = () => standalone ? edge : 0;   // ruler value at the bottom of the canvas
   const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
   // How far the rounded screen corner eats into the left edge at height y.
@@ -119,21 +121,29 @@ body {
     const half = 0.5 / dpr; // centre 1-device-pixel lines on device pixels
 
     ctx.fillStyle = ink; ctx.strokeStyle = ink;
-    ctx.font = '600 13px ' + css('--mono');
+    ctx.font = '600 22px ' + css('--mono');
     ctx.textBaseline = 'middle';
 
+    // Matching scales on both long edges, counting up from the bottom.
     // Half-mm ticks are too dense to read; stick to whole mm.
     for (let mm = Math.ceil(z); (mm - z) * ppm <= h; mm++) {
-      const y = Math.round((mm - z) * ppm * dpr) / dpr + half;
-      const x0 = cornerInset(y, h);
-      const len = mm % 10 === 0 ? 30 : mm % 5 === 0 ? 20 : 12;
+      const y = Math.round((h - (mm - z) * ppm) * dpr) / dpr - half;
+      const inset = cornerInset(y, h);
+      const len = mm % 10 === 0 ? 36 : mm % 5 === 0 ? 24 : 14;
       ctx.lineWidth = mm % 10 === 0 ? 1.5 : 1 / dpr * 2;
-      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + len, y); ctx.stroke();
-      if (mm % 10 === 0) ctx.fillText(String(mm), x0 + 36, Math.max(y, 8));
+      ctx.beginPath();
+      ctx.moveTo(inset, y); ctx.lineTo(inset + len, y);
+      ctx.moveTo(w - inset, y); ctx.lineTo(w - inset - len, y);
+      ctx.stroke();
+      if (mm % 10 === 0) {
+        const ly = Math.min(Math.max(y, 12), h - 12);
+        ctx.textAlign = 'left'; ctx.fillText(String(mm), inset + 44, ly);
+        ctx.textAlign = 'right'; ctx.fillText(String(mm), w - inset - 44, ly);
+      }
     }
 
     // Cursor
-    const cy = (cursorMm - z) * ppm;
+    const cy = h - (cursorMm - z) * ppm;
     ctx.strokeStyle = accent; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke();
 
@@ -142,7 +152,7 @@ body {
 
   function moveTo(e) {
     const rect = canvas.getBoundingClientRect();
-    const mm = zeroMm() + (e.clientY - rect.top) / pxPerMm();
+    const mm = zeroMm() + (rect.bottom - e.clientY) / pxPerMm();
     cursorMm = Math.max(0, Math.round(mm * 2) / 2); // snap to 0.5 mm
     draw();
   }
